@@ -1,57 +1,142 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using Autodesk.AutoCAD.ApplicationServices.Core;
+﻿using Autodesk.AutoCAD.ApplicationServices.Core;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Runtime;
+using Autodesk.Civil.DatabaseServices;
+using Entity = Autodesk.AutoCAD.DatabaseServices.Entity;
 
 namespace MatchLabelRotation
 {
+    public class MatchLabelRotationCommand
+    {
+        private readonly Editor _editor;
+        private readonly Database _database;
 
+        public MatchLabelRotationCommand()
+        {
+            _editor = Application.DocumentManager.MdiActiveDocument.Editor;
+            _database = Application.DocumentManager.MdiActiveDocument.Database;
+        }
 
-	public class MatchLabelRotationCommand
-	{
-		private readonly Editor _editor;
-		private readonly Database _database;
+        [CommandMethod("MatchLabelRotation", CommandFlags.Modal)]
+        public void MatchLabelRotation()
+        {
+            ObjectId basePointId = default;
 
-		public MatchLabelRotationCommand()
-		{
-			_editor = Application.DocumentManager.MdiActiveDocument.Editor;
-			_database = Application.DocumentManager.MdiActiveDocument.Database;
-		}
+            if (!TryGetImpliedSelectionOfType<CogoPoint>(out var basePoint))
+            {
+                if (basePoint.Count == 1)
+                {
+                    basePointId = basePoint[0];
+                    return;
+                }
 
-		[CommandMethod("MatchLabelRotation", CommandFlags.Modal)]
-		public void MatchLabelRotation()
-		{
-			var peo = new PromptEntityOptions("\nSelect CogoPoint label to match rotation: ");
-			peo.SetRejectMessage("\nSelected entity is not a CogoPoint label.");
-			// Assuming CogoPoint is a type from Civil 3D API
-			peo.AddAllowedClass(typeof(Autodesk.Civil.DatabaseServices.CogoPoint), false);
-			var per = _editor.GetEntity(peo);
-			if (per.Status != PromptStatus.OK)
-				return;
-			ObjectId cogoPointId = per.ObjectId;
-			var pso = new PromptSelectionOptions
-			{
-				MessageForAdding = "\nSelect CogoPoint objects to rotate: "
-			};
-			var psr = _editor.GetSelection(pso);
-			if (psr.Status != PromptStatus.OK)
-				return;
-			using (var transactAndForget = new TransactAndForget(true))
-			{
-				var cogoPoint = transactAndForget.GetObject<Autodesk.Civil.DatabaseServices.CogoPoint>(cogoPointId, OpenMode.ForRead);
-				double labelRotation = cogoPoint.LabelRotation;
-				foreach (SelectedObject selectedObject in psr.Value)
-				{
-					if (selectedObject == null) continue;
-					var entity = transactAndForget.GetObject<Autodesk.Civil.DatabaseServices.CogoPoint>(selectedObject.ObjectId, OpenMode.ForWrite);
-					entity.LabelRotation = labelRotation;
-				}
-			}
-		}
-	}
+                if (!TryGetEntityOfType<CogoPoint>("\nSelect a base CogoPoint to copy the rotation of: ", out basePointId))
+                {
+                    return;
+                }
+            }
+
+            if (!TryGetEntityOfType<CogoPoint>("\nSelect CogoPoint to match rotation: ", out var pointId))
+            {
+                return;
+            }
+
+            using (var transactAndForget = new TransactAndForget(true))
+            {
+                var baseCogoPoint = transactAndForget.GetObject<CogoPoint>(basePointId, OpenMode.ForRead);
+                double labelRotation = baseCogoPoint.LabelRotation;
+
+                var entity = transactAndForget.GetObject<CogoPoint>(pointId, OpenMode.ForWrite);
+                entity.LabelRotation = labelRotation;
+            }
+        }
+
+        /// <summary>
+        /// Gets a implied selection of type T.
+        /// </summary>
+        /// <param name="objectIds">Collection of <see cref="ObjectId"/>s obtained from the selection set.</param>
+        /// <typeparam name="T">Type of <see cref="Autodesk.AutoCAD.DatabaseServices.Entity"/></typeparam>
+        /// <returns><c>true</c> if the selection was successful, otherwise <c>false</c>.</returns>
+        /// <remarks>Will filter out any entities not of type T.</remarks>
+        public bool TryGetImpliedSelectionOfType<T>(out ObjectIdCollection objectIds) where T : Entity
+        {
+            var psr = _editor.SelectImplied();
+            objectIds = new ObjectIdCollection();
+
+            if (psr.Status != PromptStatus.OK)
+                return false;
+
+            var entityType = RXObject.GetClass(typeof(T));
+            foreach (var objectId in psr.Value.GetObjectIds())
+            {
+                // check that the objectId type matches the entityType
+                if (objectId.ObjectClass.Equals(entityType))
+                {
+                    objectIds.Add(objectId);
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Gets the type of the entities of.
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="addMessage">The add message.</param>
+        /// <param name="removeMessage">The remove message.</param>
+        /// <param name="objectIds">The object ids.</param>
+        /// <returns><c>true</c> if successfully got a selection, <c>false</c> otherwise.</returns>
+        public bool TryGetSelectionOfType<T>(string addMessage, string removeMessage, out ObjectIdCollection objectIds) where T : Entity
+        {
+            var entityType = RXObject.GetClass(typeof(T));
+
+            objectIds = new ObjectIdCollection();
+
+            TypedValue[] typedValues = { new TypedValue((int)DxfCode.Start, entityType.DxfName) };
+            var ss = new SelectionFilter(typedValues);
+            var pso = new PromptSelectionOptions
+            {
+                MessageForAdding = addMessage,
+                MessageForRemoval = removeMessage
+            };
+
+            var result = _editor.GetSelection(pso, ss);
+
+            if (result.Status != PromptStatus.OK)
+                return false;
+
+            objectIds = new ObjectIdCollection(result.Value.GetObjectIds());
+
+            return true;
+        }
+
+        /// <summary>
+        /// Prompts the user to select a single entity of type T using GetEntity.
+        /// </summary>
+        /// <typeparam name="T">Type of <see cref="Autodesk.AutoCAD.DatabaseServices.Entity"/></typeparam>
+        /// <param name="promptMessage">The prompt message to display.</param>
+        /// <param name="objectId">The selected object's ObjectId if successful.</param>
+        /// <returns><c>true</c> if an entity of type T was selected, <c>false</c> otherwise.</returns>
+        public bool TryGetEntityOfType<T>(string promptMessage, out ObjectId objectId) where T : Entity
+        {
+            objectId = ObjectId.Null;
+            var entityType = RXObject.GetClass(typeof(T));
+            var peo = new PromptEntityOptions(promptMessage)
+            {
+                AllowNone = false
+            };
+            peo.SetRejectMessage($"\nOnly {entityType.DxfName} entities are allowed.");
+            peo.AddAllowedClass(typeof(T), exactMatch: true);
+
+            var result = _editor.GetEntity(peo);
+
+            if (result.Status != PromptStatus.OK)
+                return false;
+
+            objectId = result.ObjectId;
+            return true;
+        }
+    }
 }

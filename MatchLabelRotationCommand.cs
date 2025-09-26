@@ -18,28 +18,24 @@ namespace MatchLabelRotation
             _database = Application.DocumentManager.MdiActiveDocument.Database;
         }
 
-        [CommandMethod("MatchLabelRotation", CommandFlags.Modal)]
+        [CommandMethod("MatchLabelRotation", CommandFlags.Modal | CommandFlags.UsePickSet)]
         public void MatchLabelRotation()
         {
             ObjectId basePointId = default;
 
-            if (!TryGetImpliedSelectionOfType<CogoPoint>(out var basePoint))
+            if (TryGetImpliedSelectionOfType<CogoPoint>(out var basePoint))
             {
                 if (basePoint.Count == 1)
                 {
                     basePointId = basePoint[0];
-                    return;
                 }
-
-                if (!TryGetEntityOfType<CogoPoint>("\nSelect a base CogoPoint to copy the rotation of: ", out basePointId))
+            }
+            else
+            {
+                if (!TryGetEntityOfType<CogoPoint>("\nSelect source CogoPoint: ", out basePointId))
                 {
                     return;
                 }
-            }
-
-            if (!TryGetEntityOfType<CogoPoint>("\nSelect CogoPoint to match rotation: ", out var pointId))
-            {
-                return;
             }
 
             using (var transactAndForget = new TransactAndForget(true))
@@ -47,8 +43,17 @@ namespace MatchLabelRotation
                 var baseCogoPoint = transactAndForget.GetObject<CogoPoint>(basePointId, OpenMode.ForRead);
                 double labelRotation = baseCogoPoint.LabelRotation;
 
-                var entity = transactAndForget.GetObject<CogoPoint>(pointId, OpenMode.ForWrite);
-                entity.LabelRotation = labelRotation;
+                do
+                {
+                    if (!TryGetEntityOfType<CogoPoint>("\nSelect destination CogoPoint: ", out var pointId))
+                    {
+                        return;
+                    }
+
+                    var entity = transactAndForget.GetObject<CogoPoint>(pointId, OpenMode.ForWrite);
+                    entity.LabelRotation = labelRotation;
+                    _editor.Regen();
+                } while (true);
             }
         }
 

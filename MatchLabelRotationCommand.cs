@@ -43,17 +43,26 @@ namespace MatchLabelRotation
                 var baseCogoPoint = transactAndForget.GetObject<CogoPoint>(basePointId, OpenMode.ForRead);
                 double labelRotation = baseCogoPoint.LabelRotation;
 
-                do
+                try
                 {
-                    if (!TryGetEntityOfType<CogoPoint>("\nSelect destination CogoPoint: ", out var pointId))
+                    do
                     {
-                        return;
-                    }
+                        baseCogoPoint.Highlight();
 
-                    var entity = transactAndForget.GetObject<CogoPoint>(pointId, OpenMode.ForWrite);
-                    entity.LabelRotation = labelRotation;
-                    _editor.Regen();
-                } while (true);
+                        if (!TryGetEntityOfType<CogoPoint>("\nSelect destination CogoPoint: ", out var pointId))
+                        {
+                            return;
+                        }
+
+                        var entity = transactAndForget.GetObject<CogoPoint>(pointId, OpenMode.ForWrite);
+                        entity.LabelRotation = labelRotation;
+                        _editor.Regen();
+                    } while (true);
+                }
+                finally
+                {
+                    baseCogoPoint.Unhighlight();
+                }
             }
         }
 

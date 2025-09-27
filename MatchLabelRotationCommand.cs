@@ -10,12 +10,10 @@ namespace MatchLabelRotation
     public class MatchLabelRotationCommand
     {
         private readonly Editor _editor;
-        private readonly Database _database;
 
         public MatchLabelRotationCommand()
         {
             _editor = Application.DocumentManager.MdiActiveDocument.Editor;
-            _database = Application.DocumentManager.MdiActiveDocument.Database;
         }
 
         [CommandMethod("MatchLabelRotation", CommandFlags.Modal | CommandFlags.UsePickSet)]
@@ -49,13 +47,24 @@ namespace MatchLabelRotation
                     {
                         baseCogoPoint.Highlight();
 
-                        if (!TryGetEntityOfType<CogoPoint>("\nSelect destination CogoPoint: ", out var pointId))
+                        if (!TryGetSelectionOfType<CogoPoint>("\nSelect destination CogoPoint(s): ",
+                                "\nRemove destination CogoPoint(s): ", out var pointIds))
                         {
                             return;
                         }
 
-                        var entity = transactAndForget.GetObject<CogoPoint>(pointId, OpenMode.ForWrite);
-                        entity.LabelRotation = labelRotation;
+                        foreach (ObjectId pointId in pointIds)
+                        {
+                            if (pointId == basePointId)
+                            {
+                                continue;
+                            }
+
+                            var entity = transactAndForget.GetObject<CogoPoint>(pointId, OpenMode.ForWrite);
+                            entity.LabelRotation = labelRotation;
+                            entity.Unhighlight();
+                        }
+
                         _editor.Regen();
                     } while (true);
                 }
@@ -79,7 +88,9 @@ namespace MatchLabelRotation
             objectIds = new ObjectIdCollection();
 
             if (psr.Status != PromptStatus.OK)
+            {
                 return false;
+            }
 
             var entityType = RXObject.GetClass(typeof(T));
             foreach (var objectId in psr.Value.GetObjectIds())
@@ -101,6 +112,7 @@ namespace MatchLabelRotation
         /// <param name="addMessage">The add message.</param>
         /// <param name="removeMessage">The remove message.</param>
         /// <param name="objectIds">The object ids.</param>
+        /// <param name="singlePick">if set to <c>true</c> [single pick].</param>
         /// <returns><c>true</c> if successfully got a selection, <c>false</c> otherwise.</returns>
         public bool TryGetSelectionOfType<T>(string addMessage, string removeMessage, out ObjectIdCollection objectIds) where T : Entity
         {
@@ -113,13 +125,17 @@ namespace MatchLabelRotation
             var pso = new PromptSelectionOptions
             {
                 MessageForAdding = addMessage,
-                MessageForRemoval = removeMessage
+                MessageForRemoval = removeMessage,
+                SingleOnly = true,
+                SinglePickInSpace = true
             };
 
             var result = _editor.GetSelection(pso, ss);
 
             if (result.Status != PromptStatus.OK)
+            {
                 return false;
+            }
 
             objectIds = new ObjectIdCollection(result.Value.GetObjectIds());
 
@@ -147,7 +163,9 @@ namespace MatchLabelRotation
             var result = _editor.GetEntity(peo);
 
             if (result.Status != PromptStatus.OK)
+            {
                 return false;
+            }
 
             objectId = result.ObjectId;
             return true;
